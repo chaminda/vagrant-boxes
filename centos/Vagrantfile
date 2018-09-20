@@ -1,0 +1,71 @@
+# Copyright 2018 WSO2, Inc. (http://wso2.com)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License
+
+require 'yaml'
+require 'fileutils'
+require 'uri'
+require 'erb'
+
+FILES_PATH = "./files/"
+JDK_ARCHIVE = "jdk-8u144-linux-x64.tar.gz"
+DEFAULT_MOUNT = "/home/vagrant/"
+
+CONFIGURATIONS = YAML.load_file('config.yaml')
+
+Vagrant.configure("2") do |config|
+  config.vm.boot_timeout = 1000
+  config.vm.box = "centos/7"
+  config.vm.network "private_network", ip: "192.168.48.112"
+  
+  memory = 2048
+  cpu = 2
+  CONFIGURATIONS['boxes'].each do |box|
+    config.vm.provider :virtualbox do |vb|
+      vb.name = box['output_box_name']
+      vb.check_guest_additions = true
+      vb.functional_vboxsf = false
+      vb.gui = false
+      vb.customize ['modifyvm', :id, '--memory', memory]
+      vb.customize ['modifyvm', :id, '--cpus', cpu]
+    end
+  
+    if box['ports']
+      box['ports'].each do |port|
+        config.vm.network "forwarded_port", guest: port, host: port, guest_ip: box['ip']
+      end
+    end
+    
+    if box['resources']
+      config.vm.provision "file", source: FILES_PATH + JDK_ARCHIVE, destination: DEFAULT_MOUNT + JDK_ARCHIVE
+      box['resources'].each do |resource|
+        source = FILES_PATH + resource
+        config.vm.provision "file", source: source, destination: DEFAULT_MOUNT + resource
+      end
+    end
+    
+    if box['provisioner_script_args']
+      server = box['provisioner_script_args'][0]['server']
+      version = box['provisioner_script_args'][1]['version']
+      config.vm.provision "shell", path: box["provisioner_script"], args: [server, version, USERNAME, PASSWORD]
+    else
+      if box['python']
+        python_modules = box['python'][0]['moduels']
+        package_manager = box['python'][1]['package_manager']
+        ius_rpm = box['python'][2]['ius_rpm']
+      end
+      config.vm.provision "shell", path: box["provisioner_script"], args: [JDK_ARCHIVE, python_modules, package_manager, ius_rpm]
+    end
+
+  end
+end
